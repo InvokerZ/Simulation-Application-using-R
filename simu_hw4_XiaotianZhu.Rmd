@@ -1,0 +1,441 @@
+#pricing american options
+#Xiaotian Zhu
+```{r}
+#insert the functions which will be used later
+#uniform
+#norm
+#b-s put
+MYUNIFORM <- function(inputvar) {
+  
+  IM1<-2147483563
+  IM2<-2147483399
+  IA1<-40014
+  IA2<-40692
+  IQ1<-53668
+  IQ2<-52774
+  IR1<-12211
+  IR2<-3791
+  NTAB<-32
+  EPS<-1.2e-7
+  RNMX<-1.-EPS
+  
+  IMM1<-IM1-1
+  NDIV<-as.integer(1+IMM1/NTAB)
+  AM<-1.0/IM1
+  idum<-inputvar[1]
+  idum2<-123456789
+  numran<-inputvar[2]
+  ran2<-0
+  iy<-0
+  iv<-rep(0,NTAB)
+  rand_uniform_c<-rep(0,numran)
+  icount<-1
+  for (icount in 1:numran) {
+    if (idum <= 0) {
+      idum<-max(-idum,1)
+      idum2<-idum
+      j<-NTAB+8
+      while (j > 0) {
+        k=as.integer(idum/IQ1)
+        idum<-IA1*(idum-k*IQ1)-k*IR1
+        if (idum < 0) {idum=idum+IM1}
+        if (j <= NTAB) {iv[j]<-idum}
+        j<-j-1
+      }
+      iy<-iv[1]
+    }
+    k<-as.integer(idum/IQ1)
+    idum<-IA1*(idum-k*IQ1)-k*IR1
+    if(idum < 0) {idum=idum+IM1}
+    k=as.integer(idum2/IQ2)
+    idum2<-IA2*(idum2-k*IQ2)-k*IR2 
+    if (idum2 < 0) {idum2<-idum2+IM2}
+    j<-as.integer(iy/NDIV)+1
+    iy<-iv[j]-idum2
+    iv[j]<-idum
+    if(iy < 1) {iy<-iy+IMM1}
+    ran2<-min(AM*iy,RNMX)
+    rand_uniform_c[icount]<-ran2
+  }
+  return(rand_uniform_c)
+}
+
+
+MYNORM <- function(seed,numran) {
+  inputvar<-rep(0,2)
+  inputvar[1]<-seed
+  inputvar[2]<-numran
+  
+  rand_uniform_c<-MYUNIFORM(inputvar)
+  a0<-2.50662823884
+  a1<--18.61500062529
+  a2<-41.39119773534
+  a3<--25.44106049637
+  b0<--8.47351093090
+  b1<-23.08336743743
+  b2<--21.06224101826
+  b3<-3.13082909833
+  c0<-0.3374754822726147
+  c1<-0.9761690190917186
+  c2<-0.1607979714918209
+  c3<-0.0276438810333863
+  c4<-0.0038405729373609
+  c5<-0.0003951896511919
+  c6<-0.0000321767881768
+  c7<-0.0000002888167364
+  c8<-0.0000003960315187
+  
+  
+  inputvar<-c(seed,numran)
+  rand_uniform_c<-MYUNIFORM(inputvar)
+  #
+  # Loop over set of uniform random numbers and transform
+  #
+  jcount<-1
+
+  rand_norm_c<-rep(0,numran)
+  while(jcount <= numran) {
+    u<-rand_uniform_c[jcount]
+    y<-u-0.5
+    if(abs(y) < 0.42) {
+      r<-y*y
+      x<-y*(((a3*r+a2)*r+a1)*r+a0)/((((b3*r+b2)*r+b1)*r+b0)*r+1)
+    } else {
+      r<-u
+      if(y>0){r<-1-u}
+      r<-log(-log(r))
+      x<-c0+r*(c1+r*(c2+r*(c3+r*(c4+r*(c5+r*(c6+r*(c7+r*c8)))))))
+      if(y<0){x<--x}
+    }
+    #  cat("JCOUNT",jcount,"",u,"",x,"\n")
+    rand_norm_c[jcount]<-x
+    jcount=jcount+1
+  }
+  return(rand_norm_c)
+}
+
+
+
+MYBSPut<-function(S0,Strike,rf,T,Volatility){
+  d1<-(log(S0/Strike)+(rf+0.5*Volatility^2)*T)/(Volatility*sqrt(T))
+  d2<-d1-Volatility*sqrt(T)
+  Nmd1<-pnorm(-d1,mean=0,sd=1)
+  Nmd2<-pnorm(-d2,mean=0,sd=1)
+  P<-Strike*exp(-rf*T)*Nmd2-S0*Nmd1
+  return (P)
+}
+```
+
+#generate random num
+```{r}
+seed<--1000
+numran<-1000000
+rand_norm_c<-MYNORM(seed,numran)
+#hist(rand_norm_c)
+```
+
+```{r}
+#
+# Calculate European and American Put Values
+#
+S0<-100
+Strike<-100
+rf<-0.05
+T=1/2
+Volatility<-0.25
+#
+Put_BS<-MYBSPut(S0,Strike,rf,T,Volatility)
+#
+# Binomial Model
+#
+# Binomial parameters
+#bi-weekly over 6 months,so the numsteps should be 6/0.5
+numsteps<-12
+DelT<-T/(numsteps-1)
+uptick<-exp(+Volatility*sqrt(DelT))
+dntick<-exp(-Volatility*sqrt(DelT))
+FVFactor<-exp(rf*DelT)
+probup<-(FVFactor-dntick)/(uptick-dntick)
+probdn<-1-probup
+SMat<-matrix(rep(0),nrow=numsteps,ncol=numsteps)
+EMat<-matrix(rep(0),nrow=numsteps,ncol=numsteps)
+AMat<-matrix(rep(0),nrow=numsteps,ncol=numsteps)
+for (i in 1:numsteps) {
+  for (j in 1:i) {
+    SMat[j,i]<-S0*uptick^(i-j)*dntick^(j-1) 
+}}
+#SMat[1:6,1:6]
+
+i<-numsteps
+for (j in 1:i) {
+  EMat[j,numsteps]<-max(Strike-SMat[j,numsteps],0)
+  AMat[j,numsteps]<-max(Strike-SMat[j,numsteps],0)
+}
+i<-i-1
+while (i > 0) {
+  for (j in 1:i) {
+    EMat[j,i] <- (1/FVFactor)*(probup*EMat[j,i+1] + probdn*EMat[j+1,i+1])
+    AMat[j,i] <- (1/FVFactor)*(probup*AMat[j,i+1] + probdn*AMat[j+1,i+1])
+    AMat[j,i] <- max(AMat[j,i],Strike-SMat[j,i])
+    }
+    i<-i-1
+}
+#SMat[,numsteps]
+EMat[1,1]
+AMat[1,1]
+Put_BS
+
+```
+```{r}
+barrier<-matrix(rep(0),ncol=2,nrow=5)
+barrier[1,1]<-0.90*Strike
+barrier[2,1]<-0.88*Strike
+barrier[3,1]<-0.86*Strike
+barrier[4,1]<-0.84*Strike
+barrier[5,1]<-0.82*Strike
+lcount<-1
+for(bcount in 1:5){
+  lcount<-1
+  numpaths<-10000 
+  ST_Vals<-rep(0,numpaths)
+  Put_Vals<-rep(0,numpaths)
+  numsteps<-12
+  DelT<-T/numsteps
+  jcount<-1
+  while(jcount<=numpaths){
+    ST<-S0
+    icount<-1
+    flag<-0
+      while(icount<=numsteps){
+        ST<-ST*(exp((rf-0.5*(Volatility^2))*DelT+Volatility*sqrt(DelT)*rand_norm_c[lcount]))
+        #cat("ST is ",ST,"and barrier is",barrier[bcount,1],"\n")
+        if(ST< barrier[bcount,1]){ 
+          ST_Vals[jcount]<-ST
+          Put_Vals[jcount]<-exp(-rf*icount*DelT)*max(Strike-ST_Vals[jcount],0)
+          icount<-numsteps+1
+          flag<-1
+        }
+        icount<-icount+1
+        lcount<-lcount+1
+      }
+    if(flag==0){
+      ST_Vals[jcount]<-ST
+      Put_Vals[jcount]<-exp(-rf*T)*max(Strike-ST_Vals[jcount],0)
+    }
+    jcount<-jcount+1
+  }
+  cat(mean(Put_Vals),"\n")
+  barrier[bcount,2]<-mean(Put_Vals)
+  barrier
+}
+```
+```{r}
+# We should choose the flat barrier of 0.88*strike,the correspnding Put price is 5.945663, and the price from binomial model is 6.169597
+```
+```{r}
+#Question 2 
+
+numpaths<-10000
+Maturity<-5
+numrands<-numpaths*Maturity
+intrates<-rep(0,Maturity)
+forrates<-rep(0,Maturity)
+r1<-0.01
+r2<-0.02
+r3<-0.025
+r4<-0.03
+r5<-0.0325
+#assumption:term structure is flat
+r1<-0.05
+r2<-0.05
+r3<-0.05
+r4<-0.05
+r5<-0.05
+intrates[1]<-r1
+intrates[2]<-r2
+intrates[3]<-r3
+intrates[4]<-r4
+intrates[5]<-r5
+f1<-r1
+f2<-r2*2-r1*1
+f3<-r3*3-r2*2
+f4<-r4*4-r3*3
+f5<-r5*5-r4*4
+forrates[1]<-f1
+forrates[2]<-f2
+forrates[3]<-f3
+forrates[4]<-f4
+forrates[5]<-f5
+intrates[1:5]
+forrates[1:5]
+
+```
+```{r}
+# Simulate interest rates
+#numrands<-numpaths*Maturity
+sim_r<-matrix(rep(0),nrow=Maturity, ncol=numpaths)
+sim_bond<-matrix(rep(0),nrow=Maturity+1, ncol=numpaths)
+jcount<-1
+kcount<-1
+ncount<-1
+DeltaT<-1
+rshort<-r1
+Volatility<-0.05
+for (kcount in 1:numpaths) {
+  rshort<-r1
+  sim_r[1,kcount]<-rshort
+  for(jcount in 2:5){
+    rshort<-rshort+(forrates[jcount]-forrates[jcount-1])+(0.5*Volatility^2)*DeltaT+Volatility*sqrt(DeltaT)*rand_norm_c[ncount]
+    ncount<-ncount+1
+    sim_r[jcount,kcount]<-rshort
+    }
+  }
+sim1<-mean(sim_r[1,1:numpaths])
+sim2<-mean(sim_r[2,1:numpaths])
+sim3<-mean(sim_r[3,1:numpaths])
+sim4<-mean(sim_r[4,1:numpaths])
+sim5<-mean(sim_r[5,1:numpaths])
+print("Below is the evolution of the expected short rate over 5 years")
+sim1
+sim2
+sim3
+sim4
+sim5
+#
+# Bond Prices
+# 5-year, 6% Coupon
+# 
+FaceVal<-100
+CouponRate<-0.06
+#
+# 
+#
+Coupon<-CouponRate*FaceVal
+for (jcount in 1:numpaths){
+  sim_bond[Maturity+1,jcount]<-FaceVal
+  for (kcount in 1:Maturity) {
+    kcount1<-Maturity-kcount+1
+    kcount2<-kcount1+1
+    sim_bond[kcount1,jcount]<-(sim_bond[kcount2,jcount]+Coupon)*exp(-sim_r[kcount1,jcount]*DeltaT)
+  }
+}
+sim_bond1<-mean(sim_bond[1,1:numpaths])
+sim_bond2<-mean(sim_bond[2,1:numpaths])
+sim_bond3<-mean(sim_bond[3,1:numpaths])
+sim_bond4<-mean(sim_bond[4,1:numpaths])
+sim_bond5<-mean(sim_bond[5,1:numpaths])
+sim_bond6<-mean(sim_bond[6,1:numpaths])
+print("Below is the expected bond price over 5 years, starting with now, t=0")
+sim_bond1 
+sim_bond2
+sim_bond3
+sim_bond4
+sim_bond5
+sim_bond6
+```
+```{r}
+#
+# Option Pricing
+#
+K<-100
+OptT<-3
+sim_opt_val<-rep(0,numpaths)
+for (jcount in 1:numpaths){
+  sim_opt_payoff<-max(0,sim_bond[OptT+1,jcount]-K)
+  for (kcount in 1:OptT) {
+    sim_opt_payoff<-sim_opt_payoff*exp(-sim_r[kcount,jcount]*DeltaT)
+  }
+  sim_opt_val[jcount]<-sim_opt_payoff
+}
+#
+hist(sim_opt_val[1:numpaths])
+print("Option Value")
+mean(sim_opt_val[1:numpaths])
+```
+
+```{r}
+# part 2 Vasicek
+# Simulate interest rates
+#numrands<-numpaths*Maturity
+sim_r<-matrix(rep(0),nrow=Maturity, ncol=numpaths)
+sim_bond<-matrix(rep(0),nrow=Maturity+1, ncol=numpaths)
+jcount<-1
+kcount<-1
+ncount<-1
+DeltaT<-1
+rshort<-r1
+Volatility<-0.05
+alpha<-0.39
+for (kcount in 1:numpaths) {
+  rshort<-r1
+  sim_r[1,kcount]<-rshort
+  for(jcount in 2:5){
+    rshort<-exp(-alpha*DeltaT)*rshort+alpha*(forrates[jcount]-forrates[jcount-1])+alpha*exp(-alpha*DeltaT)*rshort+((Volatility^2)/alpha)*(exp(-alpha*DeltaT)-exp(-2*alpha*DeltaT))+((0.5*Volatility^2)/alpha)*(1-exp(-2*alpha*DeltaT))*rand_norm_c[ncount]
+    ncount<-ncount+1
+    sim_r[jcount,kcount]<-rshort
+    }
+  }
+sim1<-mean(sim_r[1,1:numpaths])
+sim2<-mean(sim_r[2,1:numpaths])
+sim3<-mean(sim_r[3,1:numpaths])
+sim4<-mean(sim_r[4,1:numpaths])
+sim5<-mean(sim_r[5,1:numpaths])
+print("Below is the evolution of the expected short rate over 5 years")
+sim1
+sim2
+sim3
+sim4
+sim5
+#
+# Bond Prices
+# 5-year, 5.13% Coupon
+# 
+FaceVal<-100
+CouponRate<-0.06
+#
+# 
+#
+Coupon<-CouponRate*FaceVal
+for (jcount in 1:numpaths){
+  sim_bond[Maturity+1,jcount]<-FaceVal
+  for (kcount in 1:Maturity) {
+    kcount1<-Maturity-kcount+1
+    kcount2<-kcount1+1
+    sim_bond[kcount1,jcount]<-(sim_bond[kcount2,jcount]+Coupon)*exp(-sim_r[kcount1,jcount]*DeltaT)
+  }
+}
+sim_bond1<-mean(sim_bond[1,1:numpaths])
+sim_bond2<-mean(sim_bond[2,1:numpaths])
+sim_bond3<-mean(sim_bond[3,1:numpaths])
+sim_bond4<-mean(sim_bond[4,1:numpaths])
+sim_bond5<-mean(sim_bond[5,1:numpaths])
+sim_bond6<-mean(sim_bond[6,1:numpaths])
+print("Below is the expected bond price over 5 years, starting with now, t=0")
+sim_bond1 
+sim_bond2
+sim_bond3
+sim_bond4
+sim_bond5
+sim_bond6
+```
+```{r}
+#
+# Option Pricing
+#
+K<-100
+OptT<-3
+sim_opt_val<-rep(0,numpaths)
+for (jcount in 1:numpaths){
+  sim_opt_payoff<-max(0,sim_bond[OptT+1,jcount]-K)
+  for (kcount in 1:OptT) {
+    sim_opt_payoff<-sim_opt_payoff*exp(-sim_r[kcount,jcount]*DeltaT)
+  }
+  sim_opt_val[jcount]<-sim_opt_payoff
+}
+#
+hist(sim_opt_val[1:numpaths])
+print("Option Value")
+mean(sim_opt_val[1:numpaths])
+```
+```
+
